@@ -265,6 +265,137 @@ if ! ping -c 1 -W 2 api.github.com &>/dev/null && ! ping -c 1 -W 2 github.com &>
     echo ""
 fi
 
+# 预下载 sing-box 及相关文件，避免后台下载失败
+echo "正在预下载 sing-box 文件..."
+pre_download_singbox() {
+    local TEMP_DIR_ACTUAL
+    if [ -L "/tmp/sing-box" ]; then
+        TEMP_DIR_ACTUAL=$(readlink -f /tmp/sing-box)
+    else
+        TEMP_DIR_ACTUAL="/tmp/sing-box"
+    fi
+    
+    # 确保目录存在
+    mkdir -p "$TEMP_DIR_ACTUAL"
+    
+    # 检测系统架构
+    local ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64)
+            SING_BOX_ARCH="amd64"
+            JQ_ARCH="amd64"
+            QRENCODE_ARCH="amd64"
+            ARGO_ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            SING_BOX_ARCH="arm64"
+            JQ_ARCH="arm64"
+            QRENCODE_ARCH="arm64"
+            ARGO_ARCH="arm64"
+            ;;
+        armv7l)
+            SING_BOX_ARCH="armv7"
+            JQ_ARCH="armhf"
+            QRENCODE_ARCH="arm"
+            ARGO_ARCH="arm"
+            ;;
+        *)
+            echo "警告：不支持的架构 $ARCH，跳过预下载"
+            return 1
+            ;;
+    esac
+    
+    # 获取版本号（使用默认版本或尝试获取最新版本）
+    local VERSION="1.13.0-alpha.33"  # 默认版本
+    if command -v wget &>/dev/null; then
+        local API_RESPONSE=$(wget --no-check-certificate --server-response --tries=2 --timeout=5 -qO- "https://api.github.com/repos/SagerNet/sing-box/releases" 2>&1 | grep -E '^[ ]+HTTP/|tag_name' | head -20)
+        if grep -q 'HTTP.* 200' <<< "$API_RESPONSE"; then
+            local LATEST_VERSION=$(echo "$API_RESPONSE" | awk -F '["v-]' '/tag_name/{print $5}' | sort -Vr | sed -n '1p')
+            if [ -n "$LATEST_VERSION" ]; then
+                VERSION="$LATEST_VERSION"
+            fi
+        fi
+    fi
+    
+    echo "检测到架构: $ARCH ($SING_BOX_ARCH), 版本: $VERSION"
+    
+    # 下载 sing-box
+    if [ ! -f "$TEMP_DIR_ACTUAL/sing-box" ]; then
+        echo "正在下载 sing-box..."
+        local DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
+        if wget --no-check-certificate --timeout=30 --tries=3 -qO- "$DOWNLOAD_URL" 2>/dev/null | tar xz -C "$TEMP_DIR_ACTUAL" "sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" 2>/dev/null; then
+            if [ -f "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" ]; then
+                mv "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" "$TEMP_DIR_ACTUAL/sing-box"
+                rm -rf "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}" 2>/dev/null
+                chmod +x "$TEMP_DIR_ACTUAL/sing-box" 2>/dev/null
+                echo "✓ sing-box 下载成功"
+            else
+                echo "✗ sing-box 下载失败：文件未找到"
+                return 1
+            fi
+        else
+            echo "✗ sing-box 下载失败：网络错误或文件不存在"
+            return 1
+        fi
+    else
+        echo "✓ sing-box 已存在"
+    fi
+    
+    # 下载 jq
+    if [ ! -f "$TEMP_DIR_ACTUAL/jq" ]; then
+        echo "正在下载 jq..."
+        if wget --no-check-certificate --timeout=30 --tries=3 -qO "$TEMP_DIR_ACTUAL/jq" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-${JQ_ARCH}" 2>/dev/null; then
+            chmod +x "$TEMP_DIR_ACTUAL/jq" 2>/dev/null
+            echo "✓ jq 下载成功"
+        else
+            echo "✗ jq 下载失败"
+        fi
+    else
+        echo "✓ jq 已存在"
+    fi
+    
+    # 下载 cloudflared
+    if [ ! -f "$TEMP_DIR_ACTUAL/cloudflared" ]; then
+        echo "正在下载 cloudflared..."
+        if wget --no-check-certificate --timeout=30 --tries=3 -qO "$TEMP_DIR_ACTUAL/cloudflared" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARGO_ARCH}" 2>/dev/null; then
+            chmod +x "$TEMP_DIR_ACTUAL/cloudflared" 2>/dev/null
+            echo "✓ cloudflared 下载成功"
+        else
+            echo "✗ cloudflared 下载失败"
+        fi
+    else
+        echo "✓ cloudflared 已存在"
+    fi
+    
+    # 设置文件权限，确保 root 也能访问（因为 sing-box.sh 可能以 sudo 运行）
+    chmod 755 "$TEMP_DIR_ACTUAL" 2>/dev/null || true
+    [ -f "$TEMP_DIR_ACTUAL/sing-box" ] && chmod 755 "$TEMP_DIR_ACTUAL/sing-box" 2>/dev/null || true
+    [ -f "$TEMP_DIR_ACTUAL/jq" ] && chmod 755 "$TEMP_DIR_ACTUAL/jq" 2>/dev/null || true
+    [ -f "$TEMP_DIR_ACTUAL/cloudflared" ] && chmod 755 "$TEMP_DIR_ACTUAL/cloudflared" 2>/dev/null || true
+    
+    # 验证关键文件
+    if [ -f "$TEMP_DIR_ACTUAL/sing-box" ] && [ -x "$TEMP_DIR_ACTUAL/sing-box" ]; then
+        echo "✓ 预下载完成，文件已就绪"
+        echo "  文件位置: $TEMP_DIR_ACTUAL"
+        ls -lh "$TEMP_DIR_ACTUAL"/{sing-box,jq,cloudflared} 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}'
+        return 0
+    else
+        echo "✗ 预下载失败：关键文件缺失"
+        return 1
+    fi
+}
+
+# 执行预下载
+if pre_download_singbox; then
+    echo ""
+    echo "文件已预下载，开始安装 sing-box..."
+    echo ""
+else
+    echo ""
+    echo "警告：预下载失败，sing-box.sh 将尝试自行下载"
+    echo ""
+fi
+
 if sudo ./sing-box.sh -L; then
     echo "sing-box 安装成功"
     
