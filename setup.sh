@@ -305,63 +305,108 @@ pre_download_singbox() {
             ;;
     esac
     
+    # GitHub 代理列表（与 sing-box.sh 保持一致）
+    local GH_PROXY_LIST=('' 'https://v6.gh-proxy.org/' 'https://gh-proxy.com/' 'https://hub.glowp.xyz/' 'https://proxy.vvvv.ee/' 'https://ghproxy.lvedong.eu.org/')
+    
     # 获取版本号（使用默认版本或尝试获取最新版本）
     local VERSION="1.13.0-alpha.33"  # 默认版本
+    local GH_PROXY=""
+    
     if command -v wget &>/dev/null; then
-        local API_RESPONSE=$(wget --no-check-certificate --server-response --tries=2 --timeout=5 -qO- "https://api.github.com/repos/SagerNet/sing-box/releases" 2>&1 | grep -E '^[ ]+HTTP/|tag_name' | head -20)
-        if grep -q 'HTTP.* 200' <<< "$API_RESPONSE"; then
-            local LATEST_VERSION=$(echo "$API_RESPONSE" | awk -F '["v-]' '/tag_name/{print $5}' | sort -Vr | sed -n '1p')
-            if [ -n "$LATEST_VERSION" ]; then
-                VERSION="$LATEST_VERSION"
+        # 尝试使用代理获取版本
+        for proxy in "${GH_PROXY_LIST[@]}"; do
+            local API_RESPONSE=$(wget --no-check-certificate --server-response --tries=2 --timeout=10 -qO- "${proxy}https://api.github.com/repos/SagerNet/sing-box/releases" 2>&1)
+            if echo "$API_RESPONSE" | grep -q 'HTTP.* 200'; then
+                # 提取完整的 tag_name，包括 alpha/beta 等后缀
+                local LATEST_VERSION=$(echo "$API_RESPONSE" | grep -o '"tag_name":"[^"]*"' | head -1 | sed 's/"tag_name":"v\?\([^"]*\)"/\1/')
+                if [ -n "$LATEST_VERSION" ] && [[ "$LATEST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                    VERSION="$LATEST_VERSION"
+                    GH_PROXY="$proxy"
+                    if [ -n "$proxy" ]; then
+                        echo "使用 GitHub 代理: $proxy"
+                    fi
+                    break
+                fi
             fi
-        fi
+        done
     fi
     
     echo "检测到架构: $ARCH ($SING_BOX_ARCH), 版本: $VERSION"
     
-    # 下载 sing-box
+    # 下载 sing-box（尝试多个代理）
     if [ ! -f "$TEMP_DIR_ACTUAL/sing-box" ]; then
         echo "正在下载 sing-box..."
-        local DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
-        if wget --no-check-certificate --timeout=30 --tries=3 -qO- "$DOWNLOAD_URL" 2>/dev/null | tar xz -C "$TEMP_DIR_ACTUAL" "sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" 2>/dev/null; then
-            if [ -f "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" ]; then
-                mv "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" "$TEMP_DIR_ACTUAL/sing-box"
-                rm -rf "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}" 2>/dev/null
-                chmod +x "$TEMP_DIR_ACTUAL/sing-box" 2>/dev/null
-                echo "✓ sing-box 下载成功"
-            else
-                echo "✗ sing-box 下载失败：文件未找到"
-                return 1
+        local DOWNLOAD_SUCCESS=false
+        
+        for proxy in "${GH_PROXY_LIST[@]}"; do
+            local DOWNLOAD_URL="${proxy}https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
+            echo "  尝试下载: ${proxy:-直连}..."
+            
+            # 先测试 URL 是否可访问
+            if wget --no-check-certificate --spider --timeout=10 --tries=1 "$DOWNLOAD_URL" 2>/dev/null; then
+                # 下载文件
+                if wget --no-check-certificate --timeout=60 --tries=2 -qO- "$DOWNLOAD_URL" 2>/tmp/sing-box-download.log | tar xz -C "$TEMP_DIR_ACTUAL" "sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" 2>>/tmp/sing-box-download.log; then
+                    if [ -f "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" ]; then
+                        mv "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" "$TEMP_DIR_ACTUAL/sing-box"
+                        rm -rf "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}" 2>/dev/null
+                        chmod +x "$TEMP_DIR_ACTUAL/sing-box" 2>/dev/null
+                        echo "✓ sing-box 下载成功 (使用: ${proxy:-直连})"
+                        DOWNLOAD_SUCCESS=true
+                        break
+                    fi
+                fi
             fi
-        else
-            echo "✗ sing-box 下载失败：网络错误或文件不存在"
+        done
+        
+        if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
+            echo "✗ sing-box 下载失败"
+            echo "  尝试的 URL: https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
+            if [ -f /tmp/sing-box-download.log ]; then
+                echo "  错误日志:"
+                tail -5 /tmp/sing-box-download.log 2>/dev/null | sed 's/^/    /'
+                rm -f /tmp/sing-box-download.log
+            fi
             return 1
         fi
     else
         echo "✓ sing-box 已存在"
     fi
     
-    # 下载 jq
+    # 下载 jq（尝试多个代理）
     if [ ! -f "$TEMP_DIR_ACTUAL/jq" ]; then
         echo "正在下载 jq..."
-        if wget --no-check-certificate --timeout=30 --tries=3 -qO "$TEMP_DIR_ACTUAL/jq" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-${JQ_ARCH}" 2>/dev/null; then
-            chmod +x "$TEMP_DIR_ACTUAL/jq" 2>/dev/null
-            echo "✓ jq 下载成功"
-        else
-            echo "✗ jq 下载失败"
+        local JQ_SUCCESS=false
+        for proxy in "${GH_PROXY_LIST[@]}"; do
+            local JQ_URL="${proxy}https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-${JQ_ARCH}"
+            if wget --no-check-certificate --timeout=30 --tries=2 -qO "$TEMP_DIR_ACTUAL/jq" "$JQ_URL" 2>/dev/null && [ -s "$TEMP_DIR_ACTUAL/jq" ]; then
+                chmod +x "$TEMP_DIR_ACTUAL/jq" 2>/dev/null
+                echo "✓ jq 下载成功 (使用: ${proxy:-直连})"
+                JQ_SUCCESS=true
+                break
+            fi
+        done
+        if [ "$JQ_SUCCESS" = "false" ]; then
+            echo "✗ jq 下载失败（非关键，继续安装）"
         fi
     else
         echo "✓ jq 已存在"
     fi
     
-    # 下载 cloudflared
+    # 下载 cloudflared（尝试多个代理）
     if [ ! -f "$TEMP_DIR_ACTUAL/cloudflared" ]; then
         echo "正在下载 cloudflared..."
-        if wget --no-check-certificate --timeout=30 --tries=3 -qO "$TEMP_DIR_ACTUAL/cloudflared" "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARGO_ARCH}" 2>/dev/null; then
-            chmod +x "$TEMP_DIR_ACTUAL/cloudflared" 2>/dev/null
-            echo "✓ cloudflared 下载成功"
-        else
-            echo "✗ cloudflared 下载失败"
+        local CLOUDFLARED_SUCCESS=false
+        for proxy in "${GH_PROXY_LIST[@]}"; do
+            local CLOUDFLARED_URL="${proxy}https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARGO_ARCH}"
+            if wget --no-check-certificate --timeout=30 --tries=2 -qO "$TEMP_DIR_ACTUAL/cloudflared" "$CLOUDFLARED_URL" 2>/dev/null && [ -s "$TEMP_DIR_ACTUAL/cloudflared" ]; then
+                chmod +x "$TEMP_DIR_ACTUAL/cloudflared" 2>/dev/null
+                echo "✓ cloudflared 下载成功 (使用: ${proxy:-直连})"
+                CLOUDFLARED_SUCCESS=true
+                break
+            fi
+        done
+        if [ "$CLOUDFLARED_SUCCESS" = "false" ]; then
+            echo "✗ cloudflared 下载失败（非关键，继续安装）"
         fi
     else
         echo "✓ cloudflared 已存在"
@@ -396,7 +441,7 @@ else
     echo ""
 fi
 
-if sudo ./sing-box.sh -L; then
+if sudo ./sing-box.sh -l; then
     echo "sing-box 安装成功"
     
     # 设置 sing-box 开机自启
