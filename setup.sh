@@ -363,6 +363,11 @@ pre_download_singbox() {
 # 执行预下载（静默执行，失败时显示警告）
 pre_download_singbox 2>/dev/null || echo "警告：预下载失败，sing-box.sh 将尝试自行下载"
 
+# 如果 cloudflared 服务正在运行，先停止以避免 "Text file busy" 错误
+if systemctl is-active --quiet argo 2>/dev/null; then
+    sudo systemctl stop argo >/dev/null 2>&1
+fi
+
 if sudo ./sing-box.sh -l; then
     # 设置 sing-box 开机自启
     sudo systemctl enable sing-box >/dev/null 2>&1
