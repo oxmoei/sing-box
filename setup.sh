@@ -203,70 +203,35 @@ if [ ! -f "./sing-box.sh" ]; then
 fi
 
 # 预先创建临时目录并设置权限，避免权限问题
-echo "正在准备临时目录..."
-
-# 方案1：使用系统临时目录（需要 sudo 权限）
-# 方案2：使用用户目录下的临时目录（推荐，避免权限问题）
 USE_USER_TEMP=true  # 设置为 true 使用用户目录，false 使用系统目录
 
 if [ "$USE_USER_TEMP" = "true" ]; then
-    # 使用用户目录下的临时目录，避免权限问题
     TEMP_DIR="$HOME/.cache/sing-box-temp"
-    if [ ! -d "$TEMP_DIR" ]; then
-        mkdir -p "$TEMP_DIR"
-        chmod 700 "$TEMP_DIR"
-        echo "已创建用户临时目录: $TEMP_DIR"
-    else
-        chmod 700 "$TEMP_DIR" 2>/dev/null || true
-        echo "用户临时目录已存在: $TEMP_DIR"
-    fi
+    mkdir -p "$TEMP_DIR"
+    chmod 700 "$TEMP_DIR" 2>/dev/null || true
     
-    # 创建符号链接，让 sing-box.sh 可以使用用户目录
     SYSTEM_TEMP_DIR="/tmp/sing-box"
     if [ -L "$SYSTEM_TEMP_DIR" ] || [ ! -d "$SYSTEM_TEMP_DIR" ]; then
-        # 如果不存在或者是符号链接，创建新的符号链接
         sudo rm -rf "$SYSTEM_TEMP_DIR" 2>/dev/null || true
-        sudo ln -sf "$TEMP_DIR" "$SYSTEM_TEMP_DIR" 2>/dev/null && \
-            echo "已创建符号链接: $SYSTEM_TEMP_DIR -> $TEMP_DIR" || \
-            echo "警告：无法创建符号链接，将使用系统目录"
+        sudo ln -sf "$TEMP_DIR" "$SYSTEM_TEMP_DIR" 2>/dev/null || true
     fi
 else
-    # 使用系统临时目录（需要 sudo）
     TEMP_DIR="/tmp/sing-box"
     if [ ! -d "$TEMP_DIR" ]; then
         sudo mkdir -p "$TEMP_DIR"
-        # 设置权限，允许当前用户和 root 读写
         sudo chmod 777 "$TEMP_DIR" 2>/dev/null || sudo chmod 755 "$TEMP_DIR"
-        # 如果可能，设置目录所有者为当前用户
         if [ -n "$SUDO_USER" ]; then
             sudo chown "$SUDO_USER:$SUDO_USER" "$TEMP_DIR" 2>/dev/null || true
         fi
-        echo "临时目录已创建: $TEMP_DIR"
     else
-        # 确保目录有写权限
         sudo chmod 777 "$TEMP_DIR" 2>/dev/null || sudo chmod 755 "$TEMP_DIR"
-        echo "临时目录已存在: $TEMP_DIR"
     fi
 fi
 
 # 启动sing-box（自动选择简体中文和极速安装模式）
 echo "正在启动 sing-box..."
-echo "提示：sing-box 安装可能需要一些时间，请耐心等待..."
-echo "提示：如果下载失败，可能是网络问题，请检查："
-echo "  1. 能否访问 GitHub (api.github.com)"
-echo "  2. 网络连接是否正常"
-echo "  3. 系统架构是否支持（x86_64/amd64, aarch64/arm64, armv7l）"
-echo ""
-
-# 检查网络连接
-if ! ping -c 1 -W 2 api.github.com &>/dev/null && ! ping -c 1 -W 2 github.com &>/dev/null; then
-    echo "警告：无法连接到 GitHub，可能会影响下载"
-    echo "建议：检查网络连接或使用代理"
-    echo ""
-fi
 
 # 预下载 sing-box 及相关文件，避免后台下载失败
-echo "正在预下载 sing-box 文件..."
 pre_download_singbox() {
     local TEMP_DIR_ACTUAL
     if [ -L "/tmp/sing-box" ]; then
@@ -322,16 +287,11 @@ pre_download_singbox() {
                 if [ -n "$LATEST_VERSION" ] && [[ "$LATEST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
                     VERSION="$LATEST_VERSION"
                     GH_PROXY="$proxy"
-                    if [ -n "$proxy" ]; then
-                        echo "使用 GitHub 代理: $proxy"
-                    fi
                     break
                 fi
             fi
         done
     fi
-    
-    echo "检测到架构: $ARCH ($SING_BOX_ARCH), 版本: $VERSION"
     
     # 下载 sing-box（尝试多个代理）
     if [ ! -f "$TEMP_DIR_ACTUAL/sing-box" ]; then
@@ -340,17 +300,13 @@ pre_download_singbox() {
         
         for proxy in "${GH_PROXY_LIST[@]}"; do
             local DOWNLOAD_URL="${proxy}https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
-            echo "  尝试下载: ${proxy:-直连}..."
             
-            # 先测试 URL 是否可访问
             if wget --no-check-certificate --spider --timeout=10 --tries=1 "$DOWNLOAD_URL" 2>/dev/null; then
-                # 下载文件
                 if wget --no-check-certificate --timeout=60 --tries=2 -qO- "$DOWNLOAD_URL" 2>/tmp/sing-box-download.log | tar xz -C "$TEMP_DIR_ACTUAL" "sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" 2>>/tmp/sing-box-download.log; then
                     if [ -f "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" ]; then
                         mv "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}/sing-box" "$TEMP_DIR_ACTUAL/sing-box"
                         rm -rf "$TEMP_DIR_ACTUAL/sing-box-${VERSION}-linux-${SING_BOX_ARCH}" 2>/dev/null
                         chmod +x "$TEMP_DIR_ACTUAL/sing-box" 2>/dev/null
-                        echo "✓ sing-box 下载成功 (使用: ${proxy:-直连})"
                         DOWNLOAD_SUCCESS=true
                         break
                     fi
@@ -360,56 +316,34 @@ pre_download_singbox() {
         
         if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
             echo "✗ sing-box 下载失败"
-            echo "  尝试的 URL: https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
             if [ -f /tmp/sing-box-download.log ]; then
-                echo "  错误日志:"
-                tail -5 /tmp/sing-box-download.log 2>/dev/null | sed 's/^/    /'
+                tail -3 /tmp/sing-box-download.log 2>/dev/null | sed 's/^/  /'
                 rm -f /tmp/sing-box-download.log
             fi
             return 1
         fi
-    else
-        echo "✓ sing-box 已存在"
     fi
     
     # 下载 jq（尝试多个代理）
     if [ ! -f "$TEMP_DIR_ACTUAL/jq" ]; then
-        echo "正在下载 jq..."
-        local JQ_SUCCESS=false
         for proxy in "${GH_PROXY_LIST[@]}"; do
             local JQ_URL="${proxy}https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-${JQ_ARCH}"
             if wget --no-check-certificate --timeout=30 --tries=2 -qO "$TEMP_DIR_ACTUAL/jq" "$JQ_URL" 2>/dev/null && [ -s "$TEMP_DIR_ACTUAL/jq" ]; then
                 chmod +x "$TEMP_DIR_ACTUAL/jq" 2>/dev/null
-                echo "✓ jq 下载成功 (使用: ${proxy:-直连})"
-                JQ_SUCCESS=true
                 break
             fi
         done
-        if [ "$JQ_SUCCESS" = "false" ]; then
-            echo "✗ jq 下载失败（非关键，继续安装）"
-        fi
-    else
-        echo "✓ jq 已存在"
     fi
     
     # 下载 cloudflared（尝试多个代理）
     if [ ! -f "$TEMP_DIR_ACTUAL/cloudflared" ]; then
-        echo "正在下载 cloudflared..."
-        local CLOUDFLARED_SUCCESS=false
         for proxy in "${GH_PROXY_LIST[@]}"; do
             local CLOUDFLARED_URL="${proxy}https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARGO_ARCH}"
             if wget --no-check-certificate --timeout=30 --tries=2 -qO "$TEMP_DIR_ACTUAL/cloudflared" "$CLOUDFLARED_URL" 2>/dev/null && [ -s "$TEMP_DIR_ACTUAL/cloudflared" ]; then
                 chmod +x "$TEMP_DIR_ACTUAL/cloudflared" 2>/dev/null
-                echo "✓ cloudflared 下载成功 (使用: ${proxy:-直连})"
-                CLOUDFLARED_SUCCESS=true
                 break
             fi
         done
-        if [ "$CLOUDFLARED_SUCCESS" = "false" ]; then
-            echo "✗ cloudflared 下载失败（非关键，继续安装）"
-        fi
-    else
-        echo "✓ cloudflared 已存在"
     fi
     
     # 设置文件权限，确保 root 也能访问（因为 sing-box.sh 可能以 sudo 运行）
@@ -420,49 +354,24 @@ pre_download_singbox() {
     
     # 验证关键文件
     if [ -f "$TEMP_DIR_ACTUAL/sing-box" ] && [ -x "$TEMP_DIR_ACTUAL/sing-box" ]; then
-        echo "✓ 预下载完成，文件已就绪"
-        echo "  文件位置: $TEMP_DIR_ACTUAL"
-        ls -lh "$TEMP_DIR_ACTUAL"/{sing-box,jq,cloudflared} 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}'
         return 0
     else
-        echo "✗ 预下载失败：关键文件缺失"
         return 1
     fi
 }
 
-# 执行预下载
-if pre_download_singbox; then
-    echo ""
-    echo "文件已预下载，开始安装 sing-box..."
-    echo ""
-else
-    echo ""
-    echo "警告：预下载失败，sing-box.sh 将尝试自行下载"
-    echo ""
-fi
+# 执行预下载（静默执行，失败时显示警告）
+pre_download_singbox 2>/dev/null || echo "警告：预下载失败，sing-box.sh 将尝试自行下载"
 
 if sudo ./sing-box.sh -l; then
-    echo "sing-box 安装成功"
-    
     # 设置 sing-box 开机自启
-    echo "正在设置 sing-box 开机自启..."
-    if sudo systemctl enable sing-box 2>/dev/null; then
-        echo "sing-box 开机自启设置成功"
-    else
-        echo "警告：sing-box 开机自启设置失败"
-    fi
+    sudo systemctl enable sing-box >/dev/null 2>&1
     
-    # 等待一下让服务启动
+    # 等待服务启动
     sleep 2
     
-    # 查看 sing-box 状态
-    echo "正在查看 sing-box 状态..."
-    sudo systemctl status sing-box --no-pager -l || echo "警告：无法获取 sing-box 状态"
+    echo "安装和配置完成！"
 else
     echo "错误：sing-box 安装失败，请检查错误信息"
-    echo "提示：可能是网络问题导致下载失败，请稍后重试"
     exit 1
 fi
-
-echo ""
-echo "安装和配置完成！"
