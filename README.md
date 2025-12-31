@@ -1,15 +1,15 @@
+<div align="center">
+  <img src="introduction.jpg" alt="client" width="800" style="border-radius: 8px; margin-top: 10px;"/>
+</div>
 ## ⚙️ **一键安装、设置并启动 sing-box**
 
-* 部署多协议
-* 中文快速安装（免去配置）
-* 智能判断操作系统安装依赖和配置环境
-* 关闭防火墙
-* 允许所有入站流量
-* 清空所有过滤规则
+* 中文快速安装（使用默认配置）
+* 部署多协议节点
+* 支持Clash/V2rayN/Shadowrocket等所有科学上网客户端
+* 智能判断操作系统来安装所需依赖和配置环境
+* 自动配置防护墙、入站规则、过滤规则等
 * 开启 BBR 加速
-* 启动 sing-box
-* 设置 sing-box开机自启
-* 查看 sing-box 状态
+* 启动 sing-box 并设置开机自启
 
 ## 🖥️ **支持平台**
 
