@@ -1,6 +1,7 @@
 <div align="center">
   <img src="introduction.jpg" alt="client" width="800" style="border-radius: 8px; margin-top: 10px;"/>
 </div>
+
 ## ⚙️ **一键安装、设置并启动 sing-box**
 
 * 中文快速安装（使用默认配置）
